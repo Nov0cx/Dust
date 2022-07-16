@@ -1,0 +1,13 @@
+foo: struct {
+    pub x: int32;
+    priv y: float32;
+    z: float64; // implicit protected
+    pub fptr: func(s: string): void;
+
+    pub construct() {
+    }
+
+    pub bar: func(x: int32) { // implicit void
+        self.x = x;
+    }
+}

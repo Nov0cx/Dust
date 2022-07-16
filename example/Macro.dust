@@ -1,0 +1,5 @@
+$Macro foo() {} // compile time
+Macro bar() {} // runtime
+
+$foo() // compile time
+#bar() // runtime

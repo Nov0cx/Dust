@@ -1,0 +1,7 @@
+proct -> protected
+pub -> public
+priv -> private
+refcounted -> reference counted
+func -> function
+return -> returns
+struct -> structure

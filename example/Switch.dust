@@ -1,0 +1,39 @@
+foo: func -> void {
+    val x = 1;
+    if x == {
+        10 -> _;
+        12 -> _;
+        1 -> _;
+        _-> _;
+    }
+}
+
+foobar: func -> void {
+    val x = 1;
+    val y = if x == {
+        10 -> _;
+        12 -> _;
+        1 -> _;
+        _-> _;
+    }
+}
+
+bar: func -> void {
+    val x = 1;
+    switch x {
+        10 -> _;
+        12 -> _;
+        1 -> _;
+        _-> _;
+    }
+}
+
+baz: func -> void {
+    val x = 1;
+    val y = switch x {
+        10 -> _;
+        12 -> _;
+        1 -> _;
+        _-> _;
+    }
+}
