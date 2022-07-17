@@ -1,14 +1,20 @@
-use std::*;
+mod lexer;
 
-/*#[derive(Debug)]
+use std::*;
+use lexer::{Token, Lexer, TokenType};
+
+#[derive(Debug)]
 enum AST {
-    HEAD(Vec<AST>),
-    VALUE(String), // think i change this
-    ASSIGN(Box<AST>, Box<AST>),
-    FUNCIONCALL(String, Box<AST>),
-    EXPR(Vec<AST>),
-    RETURN(Box<AST>),
+    File { child: Vec<AST> },
+    Return { value: Box<AST> },
+    Value { value: String },
+    FunctionCall { name: String, args: Vec<AST> },
+    FunctionDefinition { name: String, args: Vec<Pair<String, String>>, body: Vec<AST>, return_type: String },
+    None,
 }
+
+#[derive(Debug, Clone)]
+struct Pair<A, B>(A, B);
 
 #[derive(Debug)]
 struct Parser {
@@ -17,6 +23,13 @@ struct Parser {
 }
 
 impl Parser {
+    pub fn with_lexer(src: String) -> Parser {
+        Parser {
+            tokens: Lexer::tokenize(src),
+            pos: 0,
+        }
+    }
+
     pub fn new(tokens: Vec<Token>) -> Parser {
         Parser {
             tokens,
@@ -25,204 +38,208 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> AST {
-        let mut main_expr = Vec::new();
-        let ast = AST::HEAD(main_expr);
+        let mut file = AST::File {
+            child: Vec::new()
+        };
+
+        let mut current_node = AST::None;
 
         while self.pos < self.tokens.len() {
-            let token = &self.tokens[self.pos];
+            let token = self.current_token().clone();
 
-            match token {
-                Token::LPAREN => {}
-                Token::RPAREN => {}
-                Token::LBRACE => {}
-                Token::RBRACE => {}
-                Token::COMMA => {}
-                Token::LANGLE => {}
-                Token::RANGLE => {}
-                Token::COLON => {}
-                Token::WORD(name) => {
-                    main_expr.push(AST::FUNCIONCALL(name.clone(), Box::new(self.parse_expr())));
+            match token.token_type {
+                TokenType::Identifier => {
+                    let colon = self.advance_with_token().unwrap().clone();
+                    if colon.token_type != TokenType::Colon {
+                        self.error_with_string(colon.line, colon.char_pos, format!("Expected ':' after identifier '{}'", token.value));
+                        break;
+                    }
+
+                    let typename = self.advance_with_token().unwrap().clone();
+
+                    if typename.value == "func" {
+                        let mut args: Vec<Pair<String, String>> = Vec::new();
+                        let mut body = Vec::new();
+
+                        let mut next = self.advance_with_token().unwrap().clone();
+
+                        let mut return_type = "void".to_string();
+
+                        // parse arguments
+                        match next.token_type {
+                            TokenType::LParen => {
+                                next = self.advance_with_token().unwrap().clone();
+                                let mut arg: Pair<String, String> = Pair("".to_string(), "".to_string());
+                                let mut parse_index = 0;
+                                while next.token_type != TokenType::RParen {
+                                    if next.token_type == TokenType::LAngle {
+                                        arg.1 = format!("{}<{}>", arg.1, self.advance_with_token().unwrap().clone().value);
+                                        self.pos += 1;
+                                        args.push(arg.clone());
+                                        parse_index = 0;
+                                    }
+
+                                    if parse_index == 0 {
+                                        arg.0 = next.value;
+                                    } else if parse_index == 1 {
+                                        if next.token_type == TokenType::Colon {
+                                            next = self.advance_with_token().unwrap().clone();
+                                        } else {
+                                            self.error_with_string(next.line, next.char_pos, format!("Expected ':' after identifier '{}'", arg.0));
+                                            break;
+                                        }
+                                        arg.1 = next.value;
+                                    } else {
+                                        self.error_with_string(next.line, next.char_pos, format!("Expected identifier after '{}'", arg.0));
+                                        self.error_with_string(next.line, next.char_pos, format!("Expected ')' after function definition"));
+                                        break;
+                                    }
+
+                                    next = self.advance_with_token().unwrap().clone();
+                                    if next.token_type == TokenType::Comma {
+                                        args.push(arg.clone());
+                                        next = self.advance_with_token().unwrap().clone();
+                                        parse_index = 0;
+                                    } else { parse_index += 1; }
+                                }
+                            }
+                            _ => {
+                                // TODO functions without arguments
+                                self.error(next.line, next.char_pos, "Expected '(' after 'func'");
+                            }
+                        }
+
+                        // get return type
+                        next = self.advance_with_token().unwrap().clone();
+                        if next.token_type == TokenType::Colon {
+                            next = self.advance_with_token().unwrap().clone();
+                            return_type = next.value;
+                        }
+
+                        next = self.advance_with_token().unwrap().clone();
+                        if next.token_type != TokenType::LBrace {
+                            self.error_with_string(next.line, next.char_pos, format!("Expected '{}' after return type", return_type));
+                            break;
+                        }
+
+                        // parse body
+                        next = self.advance_with_token().unwrap().clone();
+                        while next.token_type != TokenType::RBrace {
+                            match next.token_type {
+                                TokenType::Identifier => {
+                                    if next.value == "return" {
+                                        let mut return_value = self.advance_with_token().unwrap().clone();
+                                        if return_value.token_type != TokenType::Semicolon {
+                                            body.push(AST::Return {
+                                                value: Box::new(AST::Value { value: return_value.value })
+                                            });
+                                            self.pos += 1;
+                                            next = self.advance_with_token().unwrap().clone();
+                                            break;
+                                        } else {
+                                            if return_type != "void" {
+                                                self.error(return_value.line, return_value.char_pos, "Expected return value after 'return'");
+                                                break;
+                                            }
+                                            body.push(AST::Return {
+                                                value: Box::new(AST::Value {
+                                                    value: "".to_string()
+                                                })
+                                            });
+                                            self.pos += 1;
+                                            next = self.advance_with_token().unwrap().clone();
+                                            break;
+                                        }
+                                    }
+                                    self.error(next.line, next.char_pos, "Not implemented");
+                                }
+                                _ => {}
+                            }
+
+                            next = self.advance_with_token().unwrap().clone();
+                        }
+
+                        if next.token_type != TokenType::RBrace {
+                            println!("{:?}", next);
+                            self.error(next.line, next.char_pos, "Not closing function.");
+                            break;
+                        }
+
+                        current_node = AST::FunctionDefinition {
+                            name: token.value,
+                            args,
+                            body,
+                            return_type,
+                        };
+
+                        match file {
+                            AST::File { mut child } => {
+                                child.push(current_node);
+                                file = AST::File {
+                                    child
+                                };
+                            }
+                            _ => {
+                                panic!("Unreachable");
+                            }
+                        }
+                    }
                 }
-                Token::SEMICOLON => {}
-                Token::NUMBER(_) => {}
-            }
-
-            self.pos += 1;
-        }
-
-        ast
-    }
-}*/
-
-#[derive(Debug)]
-enum TokenType {
-    LParen,
-    RParen,
-    LBrace,
-    RBrace,
-    Comma,
-    LAngle,
-    RAngle,
-    Colon,
-    Identifier,
-    Semicolon,
-    Number
-}
-
-#[derive(Debug)]
-struct Token {
-    token_type: TokenType,
-    value: String,
-    char_pos: i32,
-    line: i32
-}
-
-impl Token {
-    pub fn new(token_type: TokenType, value: String, char_pos: i32, line: i32) -> Token {
-        Token {
-            token_type,
-            value,
-            char_pos,
-            line
-        }
-    }
-}
-
-struct Lexer {}
-
-impl Lexer {
-    pub fn tokenize(str: String) -> Vec<Token> {
-        let mut tokens = Vec::new();
-
-        let mut current_word = "".to_string();
-        let mut current_number = "".to_string();
-
-        let mut char_pos = 0;
-        let mut line = 1;
-
-        for c in str.chars() {
-            match c {
-                '(' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::LParen, c.to_string(), char_pos, line));
-                },
-                ')' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::RParen, c.to_string(), char_pos, line));
-                },
-                ':' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::Colon, c.to_string(), char_pos, line));
-                },
-                ';' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::Semicolon, c.to_string(), char_pos, line));
-                },
-                ',' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::Comma, c.to_string(), char_pos, line));
-                },
-                '<' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::LAngle, c.to_string(), char_pos, line));
-                },
-                '>' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::RAngle, c.to_string(), char_pos, line));
-                },
-                '{' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::LBrace, c.to_string(), char_pos, line));
-                },
-                '}' => {
-                    Self::check_word_number_end(&mut tokens, &mut current_word, &mut current_number, line, char_pos);
-                    tokens.push(Token::new(TokenType::RBrace, c.to_string(), char_pos, line));
-                },
                 _ => {
-                    if c.is_numeric() {
-                        if  current_word.len() != 0 {
-                            current_word.push(c);
-                        } else {
-                            current_number.push(c);
-                        }
-
-                        continue;
-                    }
-
-                    if c.is_alphabetic() {
-                        current_word.push(c);
-                    } else {
-                        if Self::is_token(c) {
-                            if current_word.len() > 0 && !c.is_numeric() {
-                                tokens.push(Token::new(TokenType::Identifier, current_word, char_pos, line));
-                                current_word = "".to_string();
-                            }
-                            if current_number.len() > 0 {
-                                tokens.push(Token::new(TokenType::Number, current_number, char_pos, line));
-                                current_number = "".to_string();
-                            }
-                        } else {
-                            eprintln!("Invalid character: {}", c);
-                        }
-                    }
-
-                    if c == '\n' {
-                        line += 1;
-                        char_pos = -1;
-                    }
+                    self.error_with_string(token.line, token.char_pos, format!("Unexpected token: {:?}", token.token_type));
                 }
             }
 
-            char_pos += 1;
+            self.advance();
         }
 
-        tokens
+        file
     }
 
-    fn check_word_number_end(vec: &mut Vec<Token>, word: &mut String, number: &mut String, line: i32, char_pos: i32) {
-        if word.len() > 0 {
-            vec.push(Token::new(TokenType::Identifier, word.clone(), char_pos, line));
-            word.clear();
-        }
-        if number.len() > 0 {
-            vec.push(Token::new(TokenType::Number, number.clone(), char_pos, line));
-            number.clear();
-        }
+    fn advance(&mut self) {
+        self.pos += 1;
     }
 
-    fn is_token(c: char) -> bool {
-        match c {
-            '(' => true,
-            ')' => true,
-            ':' => true,
-            ';' => true,
-            ',' => true,
-            '<' => true,
-            '>' => true,
-            '{' => true,
-            '}' => true,
-            _ => {
-                if c.is_numeric() {
-                    true
-                } else {
-                    if c.is_alphabetic() || c.is_whitespace() {
-                        true
-                    } else {
-                        false
-                    }
-                }
-            }
+    fn advance_with_token(&mut self) -> Option<&Token> {
+        self.pos += 1;
+        if self.pos < self.tokens.len() {
+            return Some(&self.tokens[self.pos]);
         }
+        None
     }
+
+    fn current_token(&mut self) -> &Token {
+        &self.tokens[self.pos]
+    }
+
+    fn error(&self, line: i32, char_pos: i32, msg: &str) {
+        eprintln!("[Parser] Error at {line}:{char_pos}: {}", msg);
+    }
+
+    fn error_with_string(&self, line: i32, char_pos: i32, msg: String) {
+        eprintln!("[Parser] Error at {line}:{char_pos}: {}", msg);
+    }
+}
+
+fn print_command_usage(program: String) {
+    eprintln!("Usage: {} <file>", program);
 }
 
 fn main() {
-    let intput = r#"
-    main: func(args: Array<string>): int32 {
-        return 0;
+    let args: Vec<String> = env::args().collect();
+    let program = args[0].clone();
+
+    if args.len() != 2 {
+        print_command_usage(program);
+        return;
     }
-"#;
-    println!("Input {}", intput);
-    let tokens = Lexer::tokenize(intput.to_string());
-    println!("Tokens: {:?}", tokens);
+
+    let file = fs::read_to_string(&args[1]).unwrap();
+    //println!("File: {}", file);
+    let tokens = Lexer::tokenize(file.to_string());
+    //println!("Tokens: {:?}", tokens);
+
+    let mut parser = Parser::new(tokens);
+    let ast = parser.parse();
+    println!("AST: {:?}", ast);
 }
