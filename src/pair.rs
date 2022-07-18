@@ -1,2 +1,2 @@
 #[derive(Debug, Clone)]
-pub struct Pair<A, B>(A, B);
+pub struct Pair<A, B>(pub A, pub B);
