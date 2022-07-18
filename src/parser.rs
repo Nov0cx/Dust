@@ -1,4 +1,5 @@
 use crate::{Lexer, Token, TokenType};
+use crate::pair::Pair;
 
 #[derive(Debug)]
 pub enum AST {
