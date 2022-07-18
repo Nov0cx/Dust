@@ -10,7 +10,8 @@ pub enum TokenType {
     Colon,
     Identifier,
     Semicolon,
-    Number
+    Number,
+    EOF
 }
 
 #[derive(Debug, Clone)]
@@ -32,9 +33,163 @@ impl Token {
     }
 }
 
-pub struct Lexer {}
+#[derive(Debug, Clone)]
+pub struct Lexer {
+    source: String,
+    pos: usize,
+    char_pos: i32,
+    line: i32,
+}
 
 impl Lexer {
+    pub fn new(source: String) -> Lexer {
+        Lexer {
+            source,
+            pos: 0,
+            char_pos: 1,
+            line: 1
+        }
+    }
+
+    fn peek_char(&self) -> char {
+        self.source.chars().nth(self.pos + 1).unwrap()
+    }
+
+    pub fn try_token(&mut self) -> Option<Token> {
+        let c = if let Some(ch) = self.source.chars().nth(self.pos) {
+            ch
+        } else {
+            return Some(Token::new(TokenType::EOF, "".to_string(), self.char_pos, self.line));
+        };
+        self.pos += 1;
+
+        match c {
+            '(' => {
+                return Some(Token::new(TokenType::LParen, c.to_string(), self.char_pos, self.line));
+            }
+            ')' => {
+                return Some(Token::new(TokenType::RParen, c.to_string(), self.char_pos, self.line));
+            }
+            '{' => {
+                return Some(Token::new(TokenType::LBrace, c.to_string(), self.char_pos, self.line));
+            }
+            '}' => {
+                return Some(Token::new(TokenType::RBrace, c.to_string(), self.char_pos, self.line));
+            }
+            ',' => {
+                return Some(Token::new(TokenType::Comma, c.to_string(), self.char_pos, self.line));
+            }
+            '<' => {
+                return Some(Token::new(TokenType::LAngle, c.to_string(), self.char_pos, self.line));
+            }
+            '>' => {
+                return Some(Token::new(TokenType::RAngle, c.to_string(), self.char_pos, self.line));
+            }
+            ':' => {
+                return Some(Token::new(TokenType::Colon, c.to_string(), self.char_pos, self.line));
+            }
+            ';' => {
+                return Some(Token::new(TokenType::Semicolon, c.to_string(), self.char_pos, self.line));
+            }
+            '0'..='9' => {
+                let mut value = c.to_string();
+
+                let current = self.source.chars().nth(self.pos).unwrap();
+                if current.is_digit(10) {
+                    value.push(current);
+                }
+
+
+                self.pos += 1;
+                let mut next = self.source.chars().nth(self.pos).unwrap();
+
+                while next.is_digit(10) || (next == '_' && self.peek_char().is_digit(10)) {
+                    value.push(next);
+                    self.pos += 1;
+                    next = self.source.chars().nth(self.pos).unwrap();
+                }
+
+                return Some(Token {
+                    token_type: TokenType::Number,
+                    value,
+                    char_pos: self.char_pos,
+                    line: self.line
+                });
+
+            }
+            'a'..='z' | 'A'..='Z' | '_' => {
+                let mut value = c.to_string();
+
+                let current = self.source.chars().nth(self.pos).unwrap();
+                if current.is_alphanumeric() || current == '_' {
+                    value.push(current);
+                }
+
+                self.pos += 1;
+
+                let mut next = self.source.chars().nth(self.pos).unwrap();
+                while next.is_alphanumeric() || next == '_' {
+                    value.push(next);
+                    self.pos += 1;
+                    next = self.source.chars().nth(self.pos).unwrap();
+                }
+
+                return Some(Token {
+                    token_type: TokenType::Identifier,
+                    value,
+                    char_pos: self.char_pos,
+                    line: self.line
+                });
+            }
+            '\0' => {
+                return Some(Token {
+                    token_type: TokenType::EOF,
+                    value: "".to_string(),
+                    char_pos: self.char_pos,
+                    line: self.line
+                });
+            }
+            _ => {
+                let current = self.source.chars().nth(self.pos).unwrap();
+                if current == '\n' {
+                    self.line += 1;
+                    self.char_pos = 1;
+                }
+
+                None
+            }
+        }
+    }
+
+    pub fn peek(&mut self) -> Token {
+        // saving the current position
+        let current_pos = self.pos;
+        let current_char_pos = self.char_pos;
+        let current_line = self.line;
+
+        // retrieving the token
+        let token = self.next();
+
+        // restoring the position
+        self.pos = current_pos;
+        self.char_pos = current_char_pos;
+        self.line = current_line;
+
+        token
+    }
+
+    pub fn next(&mut self) -> Token {
+
+        let mut token = self.try_token();
+
+        while token.is_none() {
+            token = self.try_token();
+        }
+
+        println!("{:?}", token);
+        token.unwrap()
+    }
+
     pub fn tokenize(str: String) -> Vec<Token> {
         let mut tokens = Vec::new();
 

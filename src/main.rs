@@ -1,3 +1,5 @@
+extern crate core;
+
 mod lexer;
 mod parser;
 mod pair;
@@ -20,11 +22,9 @@ fn main() {
     }
 
     let file = fs::read_to_string(&args[1]).unwrap();
-    //println!("File: {}", file);
-    let tokens = Lexer::tokenize(file.to_string());
-    //println!("Tokens: {:?}", tokens);
+    let mut lexer = Lexer::new(file.clone());
 
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(lexer);
     let ast = parser.parse();
     println!("AST: {:?}", ast);
 }

@@ -1,5 +1,12 @@
+
 use crate::{Lexer, Token, TokenType};
 use crate::pair::Pair;
+
+#[derive(Debug, Clone)]
+pub struct Type {
+    pub name: String,
+    pub subtype: Option<Box<Type>>
+}
 
 #[derive(Debug)]
 pub enum AST {
@@ -7,7 +14,7 @@ pub enum AST {
     Return { value: Box<AST> },
     Value { value: String },
     FunctionCall { name: String, args: Vec<AST> },
-    FunctionDefinition { name: String, args: Vec<Pair<String, String>>, body: Vec<AST>, return_type: String },
+    FunctionDefinition { name: String, args: Vec<Pair<String, Type>>, body: Vec<AST>, return_type: String },
     None,
 }
 
@@ -15,22 +22,16 @@ pub enum AST {
 
 #[derive(Debug)]
 pub struct Parser {
-    tokens: Vec<Token>,
-    pos: usize,
+    lexer: Lexer,
+    current_token: Token,
 }
 
 impl Parser {
-    pub fn with_lexer(src: String) -> Parser {
-        Parser {
-            tokens: Lexer::tokenize(src),
-            pos: 0,
-        }
-    }
 
-    pub fn new(tokens: Vec<Token>) -> Parser {
-        Parser {
-            tokens,
-            pos: 0,
+    pub fn new(lexer: Lexer) -> Parser {
+        Self {
+            lexer,
+            current_token: Token::new(TokenType::EOF, "".to_string(), -1, -1),
         }
     }
 
@@ -40,64 +41,118 @@ impl Parser {
         };
 
         let mut current_node = AST::None;
-
-        while self.pos < self.tokens.len() {
-            let token = self.current_token().clone();
-
+        
+        let mut token = self.lexer.next();
+        while token.token_type != TokenType::EOF {
             match token.token_type {
                 TokenType::Identifier => {
-                    let colon = self.advance_with_token().unwrap().clone();
+                    let colon = self.lexer.next();
                     if colon.token_type != TokenType::Colon {
-                        self.error_with_string(colon.line, colon.char_pos, format!("Expected ':' after identifier '{}'", token.value));
+                        self.error_with_string(colon.line, colon.char_pos, format!("Expected ':' after identifier '{}' but got '{}'", token.value, colon.value));
                         break;
                     }
 
-                    let typename = self.advance_with_token().unwrap().clone();
+                    let typename = self.lexer.next();
 
                     if typename.value == "func" {
-                        let mut args: Vec<Pair<String, String>> = Vec::new();
+                        let mut args: Vec<Pair<String, Type>> = Vec::new();
                         let mut body = Vec::new();
 
-                        let mut next = self.advance_with_token().unwrap().clone();
+                        let mut next = self.lexer.next();
 
                         let mut return_type = "void".to_string();
 
                         // parse arguments
                         match next.token_type {
                             TokenType::LParen => {
-                                next = self.advance_with_token().unwrap().clone();
-                                let mut arg: Pair<String, String> = Pair("".to_string(), "".to_string());
-                                let mut parse_index = 0;
-                                while next.token_type != TokenType::RParen {
-                                    if next.token_type == TokenType::LAngle {
-                                        arg.1 = format!("{}<{}>", arg.1, self.advance_with_token().unwrap().clone().value);
-                                        self.pos += 1;
-                                        args.push(arg.clone());
-                                        parse_index = 0;
-                                    }
+                                next = self.lexer.next();
+                                if next.token_type != TokenType::RParen {
+                                    if next.token_type == TokenType::Identifier {
 
-                                    if parse_index == 0 {
-                                        arg.0 = next.value;
-                                    } else if parse_index == 1 {
-                                        if next.token_type == TokenType::Colon {
-                                            next = self.advance_with_token().unwrap().clone();
-                                        } else {
-                                            self.error_with_string(next.line, next.char_pos, format!("Expected ':' after identifier '{}'", arg.0));
+                                        let mut arg_pair = Pair {
+                                            0: next.value.clone(),
+                                            1: Type {
+                                                name: "".to_string(),
+                                                subtype: None
+                                            }
+                                        };
+
+                                        let mut index = 0;
+
+
+                                        println!("{:?}", next);
+
+                                        while next.token_type != TokenType::RParen {
+
+                                            if next.token_type == TokenType::Comma {
+                                                index = 0;
+                                                args.push(arg_pair.clone());
+                                                next = self.lexer.next();
+                                            }
+
+                                            if index == 1 {
+                                                if next.token_type == TokenType::Colon {
+                                                    next = self.lexer.next();
+                                                } else {
+                                                    self.error_with_string(next.line, next.char_pos,
+                                                                           format!("Expected ':' after identifier '{}' but got '{}'", arg_pair.0, next.value));
+                                                }
+
+
+                                                let peek = self.lexer.peek();
+
+                                                if next.token_type == TokenType::Identifier {
+                                                    // not acounting nested subtypes
+                                                    if peek.token_type == TokenType::LAngle {
+                                                        arg_pair.1.name = next.value.clone();
+
+                                                        self.lexer.next();
+                                                        next = self.lexer.next();
+                                                        self.lexer.next();
+
+                                                        let subtype = Some(Box::new(Type {
+                                                            name: next.value.clone(),
+                                                            subtype: None
+                                                        }));
+                                                        arg_pair.1.subtype = subtype;
+                                                    } else {
+                                                        arg_pair.1 = Type {
+                                                            name: next.value.clone(),
+                                                            subtype: None
+                                                        };
+                                                    }
+                                                } else {
+                                                    self.error_with_string(next.line, next.char_pos,
+                                                                           format!("Expected identifier after ',' in argument list got '{}'", next.value));
+                                                    break;
+                                                }
+                                            } else if index == 0 {
+                                                arg_pair.0 = next.value.clone();
+                                            } else {
+                                                self.error_with_string(next.line, next.char_pos, format!("Expected ',' after argument '{:?}'", arg_pair.1));
+                                                break;
+                                            }
+
+                                            index += 1;
+                                            next = self.lexer.next();
+                                        }
+
+                                        if index != 2 {
+                                            self.error(next.line, next.char_pos, "The argument list has a wrong format");
                                             break;
                                         }
-                                        arg.1 = next.value;
+
+                                        args.push(arg_pair.clone());
+
+                                        // should be unreachable but just in case
+                                        if next.token_type != TokenType::RParen {
+                                            self.error_with_string(next.line, next.char_pos, format!("Expected ')' after params but got '{}'", next.value));
+                                            break;
+                                        }
                                     } else {
-                                        self.error_with_string(next.line, next.char_pos, format!("Expected identifier after '{}'", arg.0));
-                                        self.error_with_string(next.line, next.char_pos, format!("Expected ')' after function definition"));
+                                        self.error_with_string(next.line, next.char_pos, format!("Expected identifier after '(' but got '{}'", next.value));
                                         break;
                                     }
-
-                                    next = self.advance_with_token().unwrap().clone();
-                                    if next.token_type == TokenType::Comma {
-                                        args.push(arg.clone());
-                                        next = self.advance_with_token().unwrap().clone();
-                                        parse_index = 0;
-                                    } else { parse_index += 1; }
                                 }
                             }
                             _ => {
@@ -107,31 +162,30 @@ impl Parser {
                         }
 
                         // get return type
-                        next = self.advance_with_token().unwrap().clone();
+                        next = self.lexer.next();
                         if next.token_type == TokenType::Colon {
-                            next = self.advance_with_token().unwrap().clone();
+                            next = self.lexer.next();
                             return_type = next.value;
                         }
 
-                        next = self.advance_with_token().unwrap().clone();
+                        next = self.lexer.next();
                         if next.token_type != TokenType::LBrace {
                             self.error_with_string(next.line, next.char_pos, format!("Expected '{}' after return type", return_type));
                             break;
                         }
 
                         // parse body
-                        next = self.advance_with_token().unwrap().clone();
+                        next = self.lexer.next();
                         while next.token_type != TokenType::RBrace {
                             match next.token_type {
                                 TokenType::Identifier => {
                                     if next.value == "return" {
-                                        let mut return_value = self.advance_with_token().unwrap().clone();
+                                        let return_value = self.lexer.next();
                                         if return_value.token_type != TokenType::Semicolon {
                                             body.push(AST::Return {
                                                 value: Box::new(AST::Value { value: return_value.value })
                                             });
-                                            self.pos += 1;
-                                            next = self.advance_with_token().unwrap().clone();
+                                            next = self.lexer.next();
                                             break;
                                         } else {
                                             if return_type != "void" {
@@ -143,8 +197,7 @@ impl Parser {
                                                     value: "".to_string()
                                                 })
                                             });
-                                            self.pos += 1;
-                                            next = self.advance_with_token().unwrap().clone();
+                                            next = self.lexer.next();
                                             break;
                                         }
                                     }
@@ -153,17 +206,16 @@ impl Parser {
                                 _ => {}
                             }
 
-                            next = self.advance_with_token().unwrap().clone();
+                            next = self.lexer.next();
                         }
 
                         if next.token_type != TokenType::RBrace {
-                            println!("{:?}", next);
                             self.error(next.line, next.char_pos, "Not closing function.");
                             break;
                         }
 
                         current_node = AST::FunctionDefinition {
-                            name: token.value,
+                            name: token.value.clone(),
                             args,
                             body,
                             return_type,
@@ -186,34 +238,19 @@ impl Parser {
                     self.error_with_string(token.line, token.char_pos, format!("Unexpected token: {:?}", token.token_type));
                 }
             }
-
-            self.advance();
+            token = self.lexer.next();
         }
 
         file
     }
 
-    fn advance(&mut self) {
-        self.pos += 1;
-    }
-
-    fn advance_with_token(&mut self) -> Option<&Token> {
-        self.pos += 1;
-        if self.pos < self.tokens.len() {
-            return Some(&self.tokens[self.pos]);
-        }
-        None
-    }
-
-    fn current_token(&mut self) -> &Token {
-        &self.tokens[self.pos]
-    }
-
     fn error(&self, line: i32, char_pos: i32, msg: &str) {
         eprintln!("[Parser] Error at {line}:{char_pos}: {}", msg);
+        panic!();
     }
 
     fn error_with_string(&self, line: i32, char_pos: i32, msg: String) {
         eprintln!("[Parser] Error at {line}:{char_pos}: {}", msg);
+        panic!();
     }
 }
