@@ -1,23 +1,25 @@
 
 use crate::{Lexer, Token, TokenType};
 use crate::pair::Pair;
+use std::fs;
+use std::fs::File;
+use std::io::Write;
 
 #[derive(Debug, Clone)]
 pub struct Type {
     pub name: String,
-    pub subtype: Option<Box<Type>>
+    pub subtype: Option<Box<Type>>,
 }
 
 #[derive(Debug)]
 pub enum AST {
-    File { child: Vec<AST> },
+    File { child: Vec<AST>, filename: String },
     Return { value: Box<AST> },
     Value { value: String },
     FunctionCall { name: String, args: Vec<AST> },
     FunctionDefinition { name: String, args: Vec<Pair<String, Type>>, body: Vec<AST>, return_type: String },
     None,
 }
-
 
 
 #[derive(Debug)]
@@ -27,7 +29,6 @@ pub struct Parser {
 }
 
 impl Parser {
-
     pub fn new(lexer: Lexer) -> Parser {
         Self {
             lexer,
@@ -35,13 +36,14 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> AST {
+    pub fn parse(&mut self, filename: String) -> AST {
         let mut file = AST::File {
-            child: Vec::new()
+            child: Vec::new(),
+            filename,
         };
 
         let mut current_node = AST::None;
-        
+
         let mut token = self.lexer.next();
         while token.token_type != TokenType::EOF {
             match token.token_type {
@@ -68,13 +70,12 @@ impl Parser {
                                 next = self.lexer.next();
                                 if next.token_type != TokenType::RParen {
                                     if next.token_type == TokenType::Identifier {
-
                                         let mut arg_pair = Pair {
                                             0: next.value.clone(),
                                             1: Type {
                                                 name: "".to_string(),
-                                                subtype: None
-                                            }
+                                                subtype: None,
+                                            },
                                         };
 
                                         let mut index = 0;
@@ -83,7 +84,6 @@ impl Parser {
                                         println!("{:?}", next);
 
                                         while next.token_type != TokenType::RParen {
-
                                             if next.token_type == TokenType::Comma {
                                                 index = 0;
                                                 args.push(arg_pair.clone());
@@ -112,13 +112,13 @@ impl Parser {
 
                                                         let subtype = Some(Box::new(Type {
                                                             name: next.value.clone(),
-                                                            subtype: None
+                                                            subtype: None,
                                                         }));
                                                         arg_pair.1.subtype = subtype;
                                                     } else {
                                                         arg_pair.1 = Type {
                                                             name: next.value.clone(),
-                                                            subtype: None
+                                                            subtype: None,
                                                         };
                                                     }
                                                 } else {
@@ -222,10 +222,11 @@ impl Parser {
                         };
 
                         match file {
-                            AST::File { mut child } => {
+                            AST::File { mut child, filename } => {
                                 child.push(current_node);
                                 file = AST::File {
-                                    child
+                                    child,
+                                    filename,
                                 };
                             }
                             _ => {
@@ -252,5 +253,77 @@ impl Parser {
     fn error_with_string(&self, line: i32, char_pos: i32, msg: String) {
         eprintln!("[Parser] Error at {line}:{char_pos}: {}", msg);
         panic!();
+    }
+
+    fn name_with_file_from_ast(file: AST, name: String) -> String {
+        match file {
+            AST::File { child, filename } => {
+                let mut name = filename.clone();
+                name = name.replace("/", "_");
+                name = name.replace(".", "_");
+                name.push_str("__");
+                name.push_str(&name.clone());
+                name.push_str("__");
+                name
+            }
+            _ => {
+                panic!("Unreachable");
+            }
+        }
+    }
+    fn name_with_file(filename: String, name: String) -> String {
+        let mut name = filename.clone();
+        name = name.replace("/", "_");
+        name = name.replace(".", "_");
+        name.push_str("__");
+        name.push_str(&name.clone());
+        name.push_str("__");
+        name
+    }
+
+    pub fn print_debug_pseudo_asm(ast: AST, mut file: File) {
+        match ast {
+            AST::File { child, filename } => {
+                for node in child {
+                    match node {
+                        AST::FunctionDefinition { name, args, body, return_type } => {
+                            file.write(format!("{}:\n", Self::name_with_file(filename.clone(), name.clone())).as_bytes());
+                            file.write(format!("\tpush rbp\n").as_bytes());
+                            file.write(format!("\tmov rbp, rsp\n").as_bytes());
+                            file.write(format!("\tsub rsp, {}\n", args.len() * 8).as_bytes());
+                            for (index, arg) in args.iter().enumerate() {
+                                file.write(format!("\tmov [rbp - {}], {}\n", index * 8, arg.0).as_bytes());
+                            }
+                            for node in body {
+                                match node {
+                                    AST::Return { value } => {
+                                        match *value {
+                                            AST::Value { value } => {
+                                                file.write(format!("\tmov rax, {}\n", value).as_bytes());
+                                                file.write(format!("\tmov rsp, rbp\n").as_bytes());
+                                                file.write(format!("\tpop rbp\n").as_bytes());
+                                                file.write(format!("\tret\n").as_bytes());
+                                            }
+                                            _ => {
+                                                panic!("Unreachable");
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        panic!("Unreachable");
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+            }
+            _ => {
+                panic!("You can only generate pseudo-asm for files");
+            }
+        }
     }
 }
